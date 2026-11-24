@@ -7,7 +7,37 @@
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-여기에 CodePen HTML 칸 내용을 붙여넣기
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <button id="exitBtn">← 나가기</button>
+  <button id="syncBtn">싱크 맞추기</button>
+  <button id="ctlBtn">화면 조작 OFF</button>
+  <button id="viewBtn">시점: 3인칭</button>
+  <button id="runBtn">달리기 OFF</button>
+  <div id="joy"><div id="knob"></div></div>
+  <div id="emotes">
+    <button data-emote="clap">👏</button>
+    <button data-emote="wave">👋</button>
+    <button data-emote="cheer">🙌</button>
+  </div>
+  <button id="jumpBtn">점프</button>
+  <div id="enter">
+    <div class="box">
+      <h2>콘서트 입장</h2>
+      <input id="nick" maxlength="10" placeholder="닉네임 (10자 이내)">
+      <button id="enterBtn">입장</button>
+      <p>닉네임에 실명, 연락처 같은 개인정보를 쓰지 마세요.</p>
+    </div>
+  </div>
+  <script type="module" src="./script.js"></script>
+</body>
+</html>
 <script type="module" src="script.js"></script>
 </body>
 </html>
