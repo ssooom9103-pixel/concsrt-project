@@ -1,1 +1,35 @@
+html,body{margin:0;height:100%;overflow:hidden;touch-action:none;font-family:sans-serif}
+html{background:linear-gradient(#5fb4f7 0%,#bfe3fb 60%,#eaf6ff 100%)}
+body{background:transparent}
+canvas{display:block}
 
+#joy{position:fixed;left:30px;bottom:30px;width:120px;height:120px;border-radius:50%;background:rgba(0,0,0,.28);box-shadow:inset 0 0 0 2px rgba(255,255,255,.75);touch-action:none;z-index:20}
+#knob{position:absolute;left:40px;top:40px;width:40px;height:40px;border-radius:50%;background:rgba(255,255,255,.9)}
+
+#jumpBtn{position:fixed;right:30px;bottom:40px;width:90px;height:90px;border-radius:50%;border:0;background:rgba(20,20,30,.55);color:#fff;font-size:18px;touch-action:none;user-select:none;-webkit-user-select:none;z-index:20}
+#emotes{position:fixed;right:20px;bottom:145px;display:flex;gap:10px;z-index:20}
+#emotes button{width:60px;height:60px;border-radius:50%;border:0;background:rgba(20,20,30,.55);font-size:28px;touch-action:manipulation;user-select:none;-webkit-user-select:none}
+
+#exitBtn,#syncBtn,#ctlBtn,#viewBtn,#runBtn{position:fixed;z-index:20;padding:8px 12px;border:0;border-radius:8px;background:rgba(20,20,30,.55);color:#fff;font-size:14px;touch-action:manipulation;user-select:none;-webkit-user-select:none}
+#exitBtn{top:10px;left:10px}
+#syncBtn{top:10px;right:10px}
+#ctlBtn{top:56px;right:10px}
+#viewBtn{top:102px;right:10px}
+#runBtn{left:30px;bottom:165px;padding:12px 18px;font-size:16px}
+#ctlBtn.on,#runBtn.on{background:#ff66cc}
+
+#enter{position:fixed;inset:0;background:rgba(0,0,0,.8);display:flex;align-items:center;justify-content:center;z-index:30}
+#enter .box{display:flex;flex-direction:column;gap:14px;align-items:center;color:#fff;padding:20px}
+#enter h2{margin:0}
+#enter p{margin:0;font-size:13px;opacity:.7}
+#nick{font-size:18px;padding:12px 16px;border-radius:10px;border:0;width:240px;text-align:center}
+#enterBtn{font-size:22px;padding:14px 40px;border:0;border-radius:12px;background:#ff66cc;color:#fff}
+
+body:not(.in) #emotes,
+body:not(.in) #syncBtn,
+body:not(.in) #ctlBtn,
+body:not(.in) #viewBtn,
+body:not(.in) #exitBtn,
+body:not(.in) #runBtn,
+body:not(.in) #jumpBtn,
+body:not(.in) #joy{display:none}
