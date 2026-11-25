@@ -323,11 +323,14 @@ if (SHOW_DEBUG) {
   }, 500);
 }
 
-/* ============ 7. 아바타 (표정 / 옷 색 / 포인트 색) ============ */
+/* ============ 7. 아바타 (마시멜로형) ============ */
 const EMOTE_DUR = { clap: 3, wave: 2.5, cheer: 2.5 };
-const FACES = ["😊", "^ ^", "😎", "😮", "😴"];
+const FACES = ["😊", "^ ^", "😮", "😴", "ω", "😉"];
+const HAIRS = ["짧은", "단발", "긴머리", "포니", "양갈래", "똥머리"];
 const SHIRT_COLORS = ["#ffffff", "#ff6b6b", "#ff9f1c", "#ffd93d", "#6bcb77", "#4ecdc4", "#4d96ff", "#c77dff", "#ff8fc7", "#3a3f4b"];
-const ACC_COLORS = ["#ff6b6b", "#ff9f1c", "#ffd93d", "#6bcb77", "#4ecdc4", "#4d96ff", "#c77dff", "#ff8fc7", "#ffffff", "#222222"];
+const HAIR_COLORS = ["#222222", "#4a3426", "#8a5a3b", "#e0b04a", "#f0e6c8", "#c8453b", "#ff8fc7", "#9b6bd6", "#4d7fd6", "#4ecdc4"];
+const HEAD_R = 0.4, HEAD_Y = 1.55;
+const LINE_M = new THREE.MeshBasicMaterial({ color: 0x7d8391, side: THREE.BackSide });
 
 function makeLabel(text) {
   const c = document.createElement("canvas"); c.width = 256; c.height = 64;
@@ -337,53 +340,99 @@ function makeLabel(text) {
   x.fillStyle = "#fff"; x.font = "bold 30px sans-serif"; x.textAlign = "center"; x.textBaseline = "middle";
   x.fillText(text, 128, 33, 230);
   const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), transparent: true }));
-  sp.scale.set(2.4, 0.6, 1); sp.position.y = 2.35;
+  sp.scale.set(2.4, 0.6, 1); sp.position.y = 2.5;
   return sp;
 }
-function makeAvatar(name, color, accent, face) {
+
+/* o = { shirt, hair, face, blush, hs }  (색은 숫자 hex) */
+function makeAvatar(name, o) {
   const g = new THREE.Group(), rig = new THREE.Group();
   g.add(rig);
-  const white = mat(0xffffff), shirt = mat(color), dark = mat(0x444a55), black = mat(0x111111), accM = mat(accent);
-  const add = (geo, m, x, y, z, parent = rig) => { const o = new THREE.Mesh(geo, m); o.position.set(x, y, z); parent.add(o); return o; };
-  add(new THREE.BoxGeometry(0.6, 0.75, 0.35), shirt, 0, 1.05, 0);
-  add(new THREE.SphereGeometry(0.28, 16, 12), white, 0, 1.65, 0);
+  const white = mat(0xffffff), shirt = mat(o.shirt), black = mat(0x2a2a30), blushM = mat(0xff9aa8);
+  const hairM = new THREE.MeshBasicMaterial({ color: o.hair, side: THREE.DoubleSide });
+  const add = (geo, m, x, y, z, parent = rig) => {
+    const o3 = new THREE.Mesh(geo, m); o3.position.set(x, y, z); parent.add(o3); return o3;
+  };
+  const outlined = (geo, m, x, y, z, parent = rig, k = 1.07) => {
+    const o3 = add(geo, m, x, y, z, parent);
+    const ol = new THREE.Mesh(geo, LINE_M); ol.scale.setScalar(k); o3.add(ol);
+    return o3;
+  };
 
-  const band = add(new THREE.TorusGeometry(0.24, 0.032, 8, 24), accM, 0, 1.8, 0);
-  band.rotation.x = Math.PI / 2;
+  /* 몸 (티셔츠 색) + 머리 (흰색) */
+  outlined(new THREE.CapsuleGeometry(0.3, 0.3, 6, 16), shirt, 0, 0.88, 0);
+  outlined(new THREE.SphereGeometry(HEAD_R, 24, 18), white, 0, HEAD_Y, 0, rig, 1.06);
 
-  const Z = -0.262;
-  const arc = (x, y, r, flip) => {
-    const t = add(new THREE.TorusGeometry(r, 0.012, 6, 14, Math.PI), black, x, y, Z);
-    if (flip) t.rotation.z = Math.PI;
+  /* 얼굴 */
+  const fz = (x, dy) => -Math.sqrt(Math.max(0.01, HEAD_R * HEAD_R - x * x - dy * dy)) - 0.003;
+  const dot = (x, dy, r) => {
+    const d = add(new THREE.SphereGeometry(r, 10, 8), black, x, HEAD_Y + dy, fz(x, dy)); d.scale.z = 0.35; return d;
+  };
+  const arc = (x, dy, r, smile) => {
+    const t = add(new THREE.TorusGeometry(r, 0.011, 6, 14, Math.PI), black, x, HEAD_Y + dy, fz(x, dy));
+    if (smile) t.rotation.z = Math.PI;
     return t;
   };
-  const dot = (x, y, r) => add(new THREE.SphereGeometry(r, 8, 6), black, x, y, Z + 0.01);
-  const f = face | 0;
-  if (f === 0) {
-    dot(-0.1, 1.69, 0.035); dot(0.1, 1.69, 0.035); arc(0, 1.6, 0.07, true);
-  } else if (f === 1) {
-    arc(-0.1, 1.67, 0.04, false); arc(0.1, 1.67, 0.04, false); arc(0, 1.6, 0.07, true);
-  } else if (f === 2) {
-    add(new THREE.BoxGeometry(0.34, 0.08, 0.04), black, 0, 1.69, Z - 0.005);
-    arc(0, 1.59, 0.06, true);
-  } else if (f === 3) {
-    dot(-0.1, 1.69, 0.05); dot(0.1, 1.69, 0.05); dot(0, 1.58, 0.04);
-  } else {
-    add(new THREE.BoxGeometry(0.09, 0.016, 0.02), black, -0.1, 1.68, Z);
-    add(new THREE.BoxGeometry(0.09, 0.016, 0.02), black, 0.1, 1.68, Z);
-    add(new THREE.BoxGeometry(0.06, 0.014, 0.02), black, 0, 1.58, Z);
+  const bar = (x, dy, w) => add(new THREE.BoxGeometry(w, 0.014, 0.012), black, x, HEAD_Y + dy, fz(x, dy));
+  const f = o.face | 0;
+  if (f === 0) { dot(-0.13, 0.01, 0.04); dot(0.13, 0.01, 0.04); arc(0, -0.09, 0.06, true); }
+  else if (f === 1) { arc(-0.13, 0, 0.045, false); arc(0.13, 0, 0.045, false); arc(0, -0.09, 0.06, true); }
+  else if (f === 2) { dot(-0.13, 0.02, 0.05); dot(0.13, 0.02, 0.05); dot(0, -0.12, 0.035); }
+  else if (f === 3) { bar(-0.13, 0.01, 0.09); bar(0.13, 0.01, 0.09); bar(0, -0.11, 0.05); }
+  else if (f === 4) { dot(-0.13, 0.01, 0.04); dot(0.13, 0.01, 0.04); arc(-0.035, -0.09, 0.035, true); arc(0.035, -0.09, 0.035, true); }
+  else { dot(-0.13, 0.01, 0.04); arc(0.13, 0, 0.045, false); arc(0, -0.09, 0.06, true); }
+  if (o.blush) {
+    for (const s of [-1, 1]) {
+      const b = add(new THREE.SphereGeometry(0.06, 10, 8), blushM, s * 0.23, HEAD_Y - 0.06, fz(s * 0.23, -0.06));
+      b.scale.set(1.2, 0.7, 0.3);
+    }
   }
 
-  const mk = (x, y, w, h, m, shoe) => {
+  /* 머리카락 */
+  const cap = (r, th, phS, phL) => {
+    const m3 = new THREE.Mesh(new THREE.SphereGeometry(r, 24, 16, phS, phL, 0, th), hairM);
+    m3.position.set(0, HEAD_Y, 0); rig.add(m3); return m3;
+  };
+  const FRONT = 1.5 * Math.PI;                       /* 앞쪽 방향 */
+  const sideBack = (th, gap) => cap(0.43, th, FRONT + gap / 2, 2 * Math.PI - gap);
+  const hs = o.hs | 0;
+  if (hs === 0) {                                    /* 짧은 머리 */
+    cap(0.43, 1.2, 0, 2 * Math.PI); sideBack(1.45, 2.4);
+  } else if (hs === 1) {                             /* 단발 + 앞머리 */
+    cap(0.43, 1.15, 0, 2 * Math.PI);
+    cap(0.435, 1.32, FRONT - 0.8, 1.6);
+    sideBack(2.05, 1.7);
+  } else if (hs === 2) {                             /* 푼 긴 머리 */
+    cap(0.43, 1.15, 0, 2 * Math.PI); sideBack(1.9, 1.9);
+    const c = add(new THREE.SphereGeometry(0.5, 16, 12), hairM, 0, 1.2, 0.28);
+    c.scale.set(0.9, 1.15, 0.42);
+  } else if (hs === 3) {                             /* 포니테일 */
+    cap(0.43, 1.15, 0, 2 * Math.PI); sideBack(1.5, 2.2);
+    const tail = add(new THREE.CapsuleGeometry(0.1, 0.45, 4, 10), hairM, 0, 1.5, 0.47);
+    tail.rotation.x = -0.35;
+    add(new THREE.SphereGeometry(0.065, 10, 8), mat(0xe05050), 0, 1.8, 0.37);
+  } else if (hs === 4) {                             /* 양갈래 */
+    cap(0.43, 1.15, 0, 2 * Math.PI); sideBack(1.5, 2.2);
+    for (const s of [-1, 1]) {
+      const t = add(new THREE.CapsuleGeometry(0.09, 0.4, 4, 10), hairM, s * 0.47, 1.5, 0.08);
+      t.rotation.z = s * 0.2;
+      add(new THREE.SphereGeometry(0.06, 10, 8), mat(0xe05050), s * 0.41, 1.78, 0.08);
+    }
+  } else {                                           /* 똥머리 */
+    cap(0.43, 1.15, 0, 2 * Math.PI); sideBack(1.5, 2.2);
+    add(new THREE.SphereGeometry(0.17, 14, 10), hairM, 0, 2.0, 0.05);
+  }
+
+  /* 팔 / 다리 (짧고 통통하게) */
+  const mk = (x, y, r, len) => {
     const p = new THREE.Group(); p.position.set(x, y, 0); rig.add(p);
-    add(new THREE.BoxGeometry(w, h, w), m, 0, -h / 2, 0, p);
-    if (shoe) add(new THREE.BoxGeometry(0.23, 0.09, 0.32), accM, 0, -h + 0.045, -0.05, p);
+    outlined(new THREE.CapsuleGeometry(r, len, 4, 10), white, 0, -(len / 2 + r), 0, p, 1.12);
     return p;
   };
   g.userData = {
     rig,
-    armL: mk(-0.38, 1.38, 0.16, 0.6, white), armR: mk(0.38, 1.38, 0.16, 0.6, white),
-    legL: mk(-0.15, 0.68, 0.2, 0.68, dark, true), legR: mk(0.15, 0.68, 0.2, 0.68, dark, true),
+    armL: mk(-0.36, 1.18, 0.075, 0.2), armR: mk(0.36, 1.18, 0.075, 0.2),
+    legL: mk(-0.14, 0.45, 0.1, 0.25), legR: mk(0.14, 0.45, 0.1, 0.25),
   };
   if (name) g.add(makeLabel(name));
   return g;
@@ -416,7 +465,7 @@ function animateAvatar(g, t, speed, emote, et, run) {
 /* 밴드 더미 */
 if (SHOW_BAND_DUMMY) {
   for (const b of BAND) {
-    const a = makeAvatar("", b.color, 0xffffff, 0);
+    const a = makeAvatar("", { shirt: b.color, hair: 0x222222, face: 0, blush: false, hs: 0 });
     a.position.set(b.x, MAIN.top, MAIN.cz + 2); a.rotation.y = Math.PI; scene.add(a);
   }
 }
@@ -450,14 +499,20 @@ let myName = "", myEm = "", myEt = 0;
 const JUMP_POWER = 0.23, GRAV = 0.01;
 const avatar = { g: null };
 
-const cust = { shirt: "#ffffff", acc: "#ff6b6b", face: 0 };
+/* 꾸미기 값 (face 0~5, hs 머리모양 0~5, blush 볼터치) */
+const cust = { shirt: "#ffffff", hair: "#4a3426", face: 0, hs: 0, blush: false };
 try {
-  const s = JSON.parse(localStorage.getItem("lucyCust") || "null");
-  if (s && SHIRT_COLORS.includes(s.shirt)) cust.shirt = s.shirt;
-  if (s && ACC_COLORS.includes(s.acc)) cust.acc = s.acc;
-  if (s && Number.isInteger(s.face) && s.face >= 0 && s.face < FACES.length) cust.face = s.face;
+  const s = JSON.parse(localStorage.getItem("lucyCust2") || "null");
+  if (s) {
+    if (SHIRT_COLORS.includes(s.shirt)) cust.shirt = s.shirt;
+    if (HAIR_COLORS.includes(s.hair)) cust.hair = s.hair;
+    if (Number.isInteger(s.face) && s.face >= 0 && s.face < FACES.length) cust.face = s.face;
+    if (Number.isInteger(s.hs) && s.hs >= 0 && s.hs < HAIRS.length) cust.hs = s.hs;
+    cust.blush = !!s.blush;
+  }
 } catch (e) {}
-const saveCust = () => { try { localStorage.setItem("lucyCust", JSON.stringify(cust)); } catch (e) {} };
+const saveCust = () => { try { localStorage.setItem("lucyCust2", JSON.stringify(cust)); } catch (e) {} };
+const avatarOpts = () => ({ shirt: hexOf(cust.shirt), hair: hexOf(cust.hair), face: cust.face, blush: cust.blush, hs: cust.hs });
 
 /* 조이스틱 */
 let jx = 0, jy = 0, joyId = null;
@@ -522,11 +577,15 @@ document.querySelectorAll("#emotes [data-emote]").forEach((b) => {
 /* ============ 10. 온라인 플레이어 ============ */
 const remotes = {};
 let lastPlayers = {};
+const sigOf = (d) => [d.name, d.c, d.hc, d.f, d.b, d.h].join("|");
 function spawnRemote(d) {
-  const g = makeAvatar(d.name || "관객", hexOf(d.c, "#ffffff"), hexOf(d.a, "#ff6b6b"), d.f | 0);
+  const g = makeAvatar(d.name || "관객", {
+    shirt: hexOf(d.c, "#ffffff"), hair: hexOf(d.hc, "#4a3426"),
+    face: d.f | 0, blush: !!d.b, hs: d.h | 0
+  });
   g.position.set(d.x || 0, d.y || 0, d.z || 0);
   scene.add(g);
-  return { g, name: d.name, color: d.c, acc: d.a, face: d.f, speed: 0 };
+  return { g, sig: sigOf(d), speed: 0 };
 }
 function applyPlayers(v) {
   for (const id of Object.keys(remotes)) {
@@ -538,7 +597,7 @@ function applyPlayers(v) {
     const d = v[id];
     if (!d) continue;
     let r = remotes[id];
-    if (!r || r.name !== d.name || r.color !== d.c || r.acc !== d.a || r.face !== d.f) {
+    if (!r || r.sig !== sigOf(d)) {
       if (r) scene.remove(r.g);
       r = remotes[id] = spawnRemote(d);
     }
@@ -558,9 +617,9 @@ function sendState(force) {
   if (!force && key === lastSent && n - lastForce < 5000) return;
   lastSend = n; lastSent = key; if (n - lastForce >= 5000) lastForce = n;
   set(myRef, {
-    name: myName, c: cust.shirt, a: cust.acc, f: cust.face,
+    name: myName, c: cust.shirt, hc: cust.hair, f: cust.face, h: cust.hs, b: cust.blush ? 1 : 0,
     x: me.x, y: me.y, z: me.z, ry: me.ry, em: myEm, et: myEt, t: serverTimestamp()
-  }).catch(() => {});
+  }).catch((e) => { console.log("저장 실패", e); });
 }
 function leave() { if (myRef) { try { remove(myRef); } catch (e) {} } }
 addEventListener("pagehide", leave);
@@ -570,59 +629,75 @@ let pRenderer = null, pScene = null, pCam = null, pAvatar = null;
 function rebuildPreview() {
   if (!pScene) return;
   if (pAvatar) pScene.remove(pAvatar);
-  pAvatar = makeAvatar("", hexOf(cust.shirt), hexOf(cust.acc), cust.face);
+  pAvatar = makeAvatar("", avatarOpts());
   pScene.add(pAvatar);
 }
 function buildCustomUI() {
   const enterBtn = $("enterBtn");
   if (!enterBtn || !enterBtn.parentNode) return;
   const panel = document.createElement("div");
-  panel.style.cssText = "display:flex;flex-direction:column;align-items:center;gap:8px;margin:10px auto;color:#fff;font:600 13px sans-serif;";
+  panel.style.cssText = "display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:12px;margin:10px auto;color:#fff;font:600 13px sans-serif;max-width:520px;";
 
   const pc = document.createElement("canvas");
-  pc.style.cssText = "width:140px;height:180px;border-radius:14px;background:rgba(255,255,255,.12);";
+  pc.style.cssText = "width:150px;height:190px;border-radius:14px;background:rgba(255,255,255,.12);flex:none;";
   panel.appendChild(pc);
   pRenderer = new THREE.WebGLRenderer({ canvas: pc, alpha: true, antialias: true });
   pRenderer.setPixelRatio(2);
-  pRenderer.setSize(140, 180, false);
+  pRenderer.setSize(150, 190, false);
   pScene = new THREE.Scene();
-  pCam = new THREE.PerspectiveCamera(35, 140 / 180, 0.1, 50);
-  pCam.position.set(0, 1.25, 4.4);
-  pCam.lookAt(0, 1.05, 0);
+  pCam = new THREE.PerspectiveCamera(35, 150 / 190, 0.1, 50);
+  pCam.position.set(0, 1.15, 5.0);
+  pCam.lookAt(0, 1.0, 0);
   rebuildPreview();
 
+  const col = document.createElement("div");
+  col.style.cssText = "display:flex;flex-direction:column;gap:6px;align-items:flex-start;";
+  panel.appendChild(col);
   const row = (label) => {
     const wrap = document.createElement("div");
-    wrap.style.cssText = "display:flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:center;max-width:320px;";
-    const l = document.createElement("span"); l.textContent = label; l.style.cssText = "min-width:54px;text-align:right;opacity:.85;";
-    wrap.appendChild(l); panel.appendChild(wrap); return wrap;
+    wrap.style.cssText = "display:flex;align-items:center;gap:5px;flex-wrap:wrap;max-width:330px;";
+    const l = document.createElement("span"); l.textContent = label; l.style.cssText = "min-width:44px;opacity:.85;";
+    wrap.appendChild(l); col.appendChild(wrap); return wrap;
   };
   const faceRow = row("표정");
+  const blushRow = row("볼터치");
+  const hairRow = row("머리");
+  const hcRow = row("머리색");
   const shirtRow = row("옷 색");
-  const accRow = row("포인트");
-  const faceBtns = [], shirtBtns = [], accBtns = [];
+  const faceBtns = [], hairBtns = [], hcBtns = [], shirtBtns = [];
+  const blushBtn = document.createElement("button");
+  const OFF = "rgba(255,255,255,.25)";
   const mark = () => {
-    faceBtns.forEach((b, i) => b.style.borderColor = i === cust.face ? "#fff" : "rgba(255,255,255,.25)");
-    shirtBtns.forEach((b, i) => b.style.borderColor = SHIRT_COLORS[i] === cust.shirt ? "#fff" : "rgba(255,255,255,.25)");
-    accBtns.forEach((b, i) => b.style.borderColor = ACC_COLORS[i] === cust.acc ? "#fff" : "rgba(255,255,255,.25)");
+    faceBtns.forEach((b, i) => b.style.borderColor = i === cust.face ? "#fff" : OFF);
+    hairBtns.forEach((b, i) => b.style.borderColor = i === cust.hs ? "#fff" : OFF);
+    hcBtns.forEach((b, i) => b.style.borderColor = HAIR_COLORS[i] === cust.hair ? "#fff" : OFF);
+    shirtBtns.forEach((b, i) => b.style.borderColor = SHIRT_COLORS[i] === cust.shirt ? "#fff" : OFF);
+    blushBtn.style.borderColor = cust.blush ? "#fff" : OFF;
+    blushBtn.textContent = cust.blush ? "있음" : "없음";
   };
   const changed = () => { saveCust(); rebuildPreview(); mark(); };
-  FACES.forEach((f, i) => {
+  const textBtn = (label, arr, rowEl, onClick) => {
     const b = document.createElement("button");
-    b.textContent = f; b.type = "button";
-    b.style.cssText = "min-width:40px;height:34px;border-radius:10px;border:3px solid;background:rgba(0,0,0,.35);color:#fff;font:600 14px sans-serif;";
-    b.addEventListener("click", () => { cust.face = i; changed(); });
-    faceRow.appendChild(b); faceBtns.push(b);
-  });
+    b.textContent = label; b.type = "button";
+    b.style.cssText = "min-width:40px;height:32px;padding:0 8px;border-radius:10px;border:3px solid;background:rgba(0,0,0,.35);color:#fff;font:600 13px sans-serif;";
+    b.addEventListener("click", onClick);
+    rowEl.appendChild(b); if (arr) arr.push(b); return b;
+  };
+  FACES.forEach((f, i) => textBtn(f, faceBtns, faceRow, () => { cust.face = i; changed(); }));
+  HAIRS.forEach((h, i) => textBtn(h, hairBtns, hairRow, () => { cust.hs = i; changed(); }));
+  blushBtn.type = "button";
+  blushBtn.style.cssText = "min-width:56px;height:32px;padding:0 8px;border-radius:10px;border:3px solid;background:rgba(0,0,0,.35);color:#fff;font:600 13px sans-serif;";
+  blushBtn.addEventListener("click", () => { cust.blush = !cust.blush; changed(); });
+  blushRow.appendChild(blushBtn);
   const sw = (arr, list, key, rowEl) => list.forEach((c) => {
     const b = document.createElement("button");
     b.type = "button";
-    b.style.cssText = `width:28px;height:28px;border-radius:50%;border:3px solid;background:${c};padding:0;`;
+    b.style.cssText = `width:26px;height:26px;border-radius:50%;border:3px solid;background:${c};padding:0;`;
     b.addEventListener("click", () => { cust[key] = c; changed(); });
     rowEl.appendChild(b); arr.push(b);
   });
+  sw(hcBtns, HAIR_COLORS, "hair", hcRow);
   sw(shirtBtns, SHIRT_COLORS, "shirt", shirtRow);
-  sw(accBtns, ACC_COLORS, "acc", accRow);
   mark();
   enterBtn.parentNode.insertBefore(panel, enterBtn);
 }
@@ -642,7 +717,7 @@ $("enterBtn").addEventListener("click", async () => {
     Object.assign(me, { x: (Math.random() - 0.5) * 8, y: 0, z: 128, vy: 0, ry: Math.PI, speed: 0, onGround: true });
     yaw = 0; pitch = 0; myEm = ""; myEt = 0;
     if (avatar.g) scene.remove(avatar.g);
-    avatar.g = makeAvatar("", hexOf(cust.shirt), hexOf(cust.acc), cust.face);
+    avatar.g = makeAvatar("", avatarOpts());
     scene.add(avatar.g);
     inGame = true;
     document.body.classList.add("in");
