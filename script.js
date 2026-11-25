@@ -1,7 +1,8 @@
 import * as THREE from "https://esm.sh/three@0.160.0";
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import {
-  getDatabase, ref, set, get, onValue, onDisconnect, remove,
+  getDatabase, ref, set, onValue, onDisconnect, remove,
   runTransaction, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
 
@@ -41,17 +42,29 @@ const VID_PX_W = 960, VID_PX_H = 540;
 const $ = (id) => document.getElementById(id);
 const wrapAngle = (a) => { while (a > Math.PI) a -= 2 * Math.PI; while (a < -Math.PI) a += 2 * Math.PI; return a; };
 const hexOf = (s, d) => new THREE.Color(s || d).getHex();
+function toast(msg) {
+  const d = document.createElement("div");
+  d.textContent = msg;
+  d.style.cssText = "position:fixed;left:50%;top:14px;transform:translateX(-50%);z-index:60;background:rgba(0,0,0,.78);color:#fff;font:600 14px sans-serif;padding:8px 14px;border-radius:10px;";
+  document.body.appendChild(d);
+  setTimeout(() => d.remove(), 3500);
+}
 
-/* ============ 3. Firebase ============ */
+/* ============ 3. Firebase (익명 로그인) ============ */
 const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
 const db = getDatabase(app);
 let timeOffset = 0;
 onValue(ref(db, ".info/serverTimeOffset"), (s) => { timeOffset = s.val() || 0; });
 const serverNow = () => Date.now() + timeOffset;
 const videoRef = ref(db, `rooms/${ROOM}/video`);
 const playersRef = ref(db, `rooms/${ROOM}/players`);
-const myId = "p" + Math.random().toString(36).slice(2, 10);
-const myRef = ref(db, `rooms/${ROOM}/players/${myId}`);
+let myId = null, myRef = null;
+const ready = signInAnonymously(auth).then((cred) => {
+  myId = cred.user.uid;
+  myRef = ref(db, `rooms/${ROOM}/players/${myId}`);
+});
+ready.catch(() => {});
 
 /* ============ 4. Three.js 기본 ============ */
 const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
@@ -335,29 +348,27 @@ function makeAvatar(name, color, accent, face) {
   add(new THREE.BoxGeometry(0.6, 0.75, 0.35), shirt, 0, 1.05, 0);
   add(new THREE.SphereGeometry(0.28, 16, 12), white, 0, 1.65, 0);
 
-  /* 머리띠 (포인트 색) */
   const band = add(new THREE.TorusGeometry(0.24, 0.032, 8, 24), accM, 0, 1.8, 0);
   band.rotation.x = Math.PI / 2;
 
-  /* 표정 (얼굴 앞면은 -z 방향) */
   const Z = -0.262;
   const arc = (x, y, r, flip) => {
     const t = add(new THREE.TorusGeometry(r, 0.012, 6, 14, Math.PI), black, x, y, Z);
-    if (flip) t.rotation.z = Math.PI;   // 아래로 휜 호 = 웃는 입
+    if (flip) t.rotation.z = Math.PI;
     return t;
   };
   const dot = (x, y, r) => add(new THREE.SphereGeometry(r, 8, 6), black, x, y, Z + 0.01);
   const f = face | 0;
-  if (f === 0) {            // 웃는 얼굴
+  if (f === 0) {
     dot(-0.1, 1.69, 0.035); dot(0.1, 1.69, 0.035); arc(0, 1.6, 0.07, true);
-  } else if (f === 1) {     // ^ ^ 눈웃음
+  } else if (f === 1) {
     arc(-0.1, 1.67, 0.04, false); arc(0.1, 1.67, 0.04, false); arc(0, 1.6, 0.07, true);
-  } else if (f === 2) {     // 선글라스
+  } else if (f === 2) {
     add(new THREE.BoxGeometry(0.34, 0.08, 0.04), black, 0, 1.69, Z - 0.005);
     arc(0, 1.59, 0.06, true);
-  } else if (f === 3) {     // 놀란 얼굴
+  } else if (f === 3) {
     dot(-0.1, 1.69, 0.05); dot(0.1, 1.69, 0.05); dot(0, 1.58, 0.04);
-  } else {                  // 졸린 얼굴
+  } else {
     add(new THREE.BoxGeometry(0.09, 0.016, 0.02), black, -0.1, 1.68, Z);
     add(new THREE.BoxGeometry(0.09, 0.016, 0.02), black, 0.1, 1.68, Z);
     add(new THREE.BoxGeometry(0.06, 0.014, 0.02), black, 0, 1.58, Z);
@@ -439,7 +450,6 @@ let myName = "", myEm = "", myEt = 0;
 const JUMP_POWER = 0.23, GRAV = 0.01;
 const avatar = { g: null };
 
-/* 내 꾸미기 (기기에 저장) */
 const cust = { shirt: "#ffffff", acc: "#ff6b6b", face: 0 };
 try {
   const s = JSON.parse(localStorage.getItem("lucyCust") || "null");
@@ -511,14 +521,14 @@ document.querySelectorAll("#emotes [data-emote]").forEach((b) => {
 
 /* ============ 10. 온라인 플레이어 ============ */
 const remotes = {};
-function spawnRemote(id, d) {
+let lastPlayers = {};
+function spawnRemote(d) {
   const g = makeAvatar(d.name || "관객", hexOf(d.c, "#ffffff"), hexOf(d.a, "#ff6b6b"), d.f | 0);
   g.position.set(d.x || 0, d.y || 0, d.z || 0);
   scene.add(g);
-  return (remotes[id] = { g, name: d.name, color: d.c, acc: d.a, face: d.f, speed: 0 });
+  return { g, name: d.name, color: d.c, acc: d.a, face: d.f, speed: 0 };
 }
-onValue(playersRef, (snap) => {
-  const v = snap.val() || {};
+function applyPlayers(v) {
   for (const id of Object.keys(remotes)) {
     if (!v[id]) { scene.remove(remotes[id].g); delete remotes[id]; }
   }
@@ -526,17 +536,22 @@ onValue(playersRef, (snap) => {
   for (const id of Object.keys(v)) {
     if (id === myId) continue;
     const d = v[id];
+    if (!d) continue;
     let r = remotes[id];
     if (!r || r.name !== d.name || r.color !== d.c || r.acc !== d.a || r.face !== d.f) {
       if (r) scene.remove(r.g);
-      r = spawnRemote(id, d);
+      r = remotes[id] = spawnRemote(d);
     }
-    Object.assign(r, { tx: d.x || 0, ty: d.y || 0, tz: d.z || 0, try_: d.ry || 0, em: d.em || "", et: d.et || 0 });
+    Object.assign(r, { tx: d.x || 0, ty: d.y || 0, tz: d.z || 0, try_: d.ry || 0, em: d.em || "", et: d.et || 0, t: d.t || serverNow() });
   }
+}
+ready.then(() => {
+  onValue(playersRef, (snap) => { lastPlayers = snap.val() || {}; applyPlayers(lastPlayers); });
 });
+
 let lastSend = 0, lastForce = 0, lastSent = "";
 function sendState(force) {
-  if (!inGame) return;
+  if (!inGame || !myRef) return;
   const n = performance.now();
   if (!force && n - lastSend < 100) return;
   const key = [me.x.toFixed(2), me.y.toFixed(2), me.z.toFixed(2), me.ry.toFixed(2), myEm, myEt].join();
@@ -547,24 +562,8 @@ function sendState(force) {
     x: me.x, y: me.y, z: me.z, ry: me.ry, em: myEm, et: myEt, t: serverTimestamp()
   }).catch(() => {});
 }
-
-/* 유령 플레이어 자동 정리: 30초 넘게 신호가 없으면 삭제 */
-setInterval(async () => {
-  if (!inGame) return;
-  try {
-    const s = await get(playersRef);
-    const v = s.val() || {};
-    for (const id of Object.keys(v)) {
-      if (id === myId) continue;
-      const t = v[id] && v[id].t;
-      if (!t || serverNow() - t > 30000) {
-        remove(ref(db, `rooms/${ROOM}/players/${id}`)).catch(() => {});
-        if (remotes[id]) { scene.remove(remotes[id].g); delete remotes[id]; }
-      }
-    }
-  } catch (e) {}
-}, 5000);
-addEventListener("pagehide", () => { try { remove(myRef); } catch (e) {} });
+function leave() { if (myRef) { try { remove(myRef); } catch (e) {} } }
+addEventListener("pagehide", leave);
 
 /* ============ 10.5 꾸미기 화면 (이름 입력 화면에 자동 추가) ============ */
 let pRenderer = null, pScene = null, pCam = null, pAvatar = null;
@@ -630,47 +629,46 @@ function buildCustomUI() {
 try { buildCustomUI(); } catch (e) { console.log("꾸미기 UI 오류", e); }
 
 /* ============ 11. 입장 / 나가기 ============ */
+let entering = false;
 $("enterBtn").addEventListener("click", async () => {
-  let nm = ($("nick").value || "").trim().slice(0, 12);
-  if (!nm) nm = "관객" + Math.floor(Math.random() * 900 + 100);
-  myName = nm;
-  saveCust();
-  Object.assign(me, { x: (Math.random() - 0.5) * 8, y: 0, z: 128, vy: 0, ry: Math.PI, speed: 0, onGround: true });
-  yaw = 0; pitch = 0; myEm = ""; myEt = 0;
-  if (avatar.g) scene.remove(avatar.g);
-  avatar.g = makeAvatar("", hexOf(cust.shirt), hexOf(cust.acc), cust.face);
-  scene.add(avatar.g);
-  inGame = true;
-  document.body.classList.add("in");
-  $("enter").style.display = "none";
-  $("viewBtn").textContent = firstPerson ? "1인칭" : "3인칭";
-  $("ctlBtn").textContent = "화면 조작 OFF";
-  try { await ensureVideoStart(); } catch (e) { videoStart = serverNow(); }
-  try { onDisconnect(myRef).remove(); } catch (e) {}
-  sendState(true);
-  syncVideo();
-  get(playersRef).then((s) => {
-    const v = s.val() || {};
-    for (const id of Object.keys(v)) {
-      if (id === myId || remotes[id]) continue;
-      const d = v[id];
-      const r = spawnRemote(id, d);
-      Object.assign(r, { tx: d.x || 0, ty: d.y || 0, tz: d.z || 0, try_: d.ry || 0, em: d.em || "", et: d.et || 0 });
-    }
-  }).catch(() => {});
+  if (entering || inGame) return;
+  entering = true;
+  try {
+    try { await ready; } catch (e) { toast("서버 연결에 실패했어요. 새로고침 해 주세요."); return; }
+    let nm = ($("nick").value || "").trim().slice(0, 12);
+    if (!nm) nm = "관객" + Math.floor(Math.random() * 900 + 100);
+    myName = nm;
+    saveCust();
+    Object.assign(me, { x: (Math.random() - 0.5) * 8, y: 0, z: 128, vy: 0, ry: Math.PI, speed: 0, onGround: true });
+    yaw = 0; pitch = 0; myEm = ""; myEt = 0;
+    if (avatar.g) scene.remove(avatar.g);
+    avatar.g = makeAvatar("", hexOf(cust.shirt), hexOf(cust.acc), cust.face);
+    scene.add(avatar.g);
+    inGame = true;
+    document.body.classList.add("in");
+    $("enter").style.display = "none";
+    $("viewBtn").textContent = firstPerson ? "1인칭" : "3인칭";
+    $("ctlBtn").textContent = "화면 조작 OFF";
+    try { await ensureVideoStart(); } catch (e) { videoStart = serverNow(); }
+    try { onDisconnect(myRef).remove(); } catch (e) {}
+    sendState(true);
+    syncVideo();
+    applyPlayers(lastPlayers);
+  } finally {
+    entering = false;
+  }
 });
 $("exitBtn").addEventListener("click", () => {
   inGame = false;
   setCtl(false);
   try { yt && yt.pauseVideo(); } catch (e) {}
-  remove(myRef).catch(() => {});
+  if (myRef) remove(myRef).catch(() => {});
   for (const id of Object.keys(remotes)) { scene.remove(remotes[id].g); delete remotes[id]; }
   if (avatar.g) { scene.remove(avatar.g); avatar.g = null; }
   running = false; $("runBtn").textContent = "달리기"; $("runBtn").style.background = "";
   document.body.classList.remove("in");
   $("enter").style.display = "";
 });
-addEventListener("beforeunload", () => { try { remove(myRef); } catch (e) {} });
 
 /* ============ 12. 메인 루프 ============ */
 addEventListener("resize", () => {
@@ -726,6 +724,7 @@ function animate() {
       const dr = wrapAngle(r.try_ - r.g.rotation.y); r.g.rotation.y += dr * 0.2;
       const spd = Math.hypot(r.g.position.x - px, r.g.position.z - pz) / Math.max(k, 0.001);
       r.speed += (spd - r.speed) * 0.3;
+      r.g.visible = serverNow() - r.t < 30000;   // 30초 넘게 신호 없으면 숨김
       animateAvatar(r.g, T, r.speed, r.em, r.et, r.speed > 0.25);
     }
   } else {
