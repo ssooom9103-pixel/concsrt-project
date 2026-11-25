@@ -323,14 +323,15 @@ if (SHOW_DEBUG) {
   }, 500);
 }
 
-/* ============ 7. 아바타 (마시멜로형) ============ */
+/* ============ 7. 아바타 (마시멜로형: 머리+몸이 하나로 이어진 둥근 몸) ============ */
 const EMOTE_DUR = { clap: 3, wave: 2.5, cheer: 2.5 };
 const FACES = ["😊", "^ ^", "😮", "😴", "ω", "😉"];
 const HAIRS = ["짧은", "단발", "긴머리", "포니", "양갈래", "똥머리"];
 const SHIRT_COLORS = ["#ffffff", "#ff6b6b", "#ff9f1c", "#ffd93d", "#6bcb77", "#4ecdc4", "#4d96ff", "#c77dff", "#ff8fc7", "#3a3f4b"];
 const HAIR_COLORS = ["#222222", "#4a3426", "#8a5a3b", "#e0b04a", "#f0e6c8", "#c8453b", "#ff8fc7", "#9b6bd6", "#4d7fd6", "#4ecdc4"];
-const HEAD_R = 0.4, HEAD_Y = 1.55;
-const LINE_M = new THREE.MeshBasicMaterial({ color: 0x7d8391, side: THREE.BackSide });
+const BODY = { cy: 0.95, rx: 0.6, ry: 0.72, rz: 0.55 };   /* 둥근 몸(타원체) 크기 */
+const LINE_M = new THREE.MeshBasicMaterial({ color: 0x4a4048, side: THREE.BackSide });
+const ARM_X = 0.56, ARM_Y = 0.95, LEG_X = 0.2, LEG_Y = 0.3;
 
 function makeLabel(text) {
   const c = document.createElement("canvas"); c.width = 256; c.height = 64;
@@ -348,108 +349,121 @@ function makeLabel(text) {
 function makeAvatar(name, o) {
   const g = new THREE.Group(), rig = new THREE.Group();
   g.add(rig);
-  const white = mat(0xffffff), shirt = mat(o.shirt), black = mat(0x2a2a30), blushM = mat(0xff9aa8);
+  const B = BODY;
+  const white = mat(0xffffff), shirtM = mat(o.shirt), black = mat(0x2a2a30), blushM = mat(0xff9aa8), tieM = mat(0xe05050);
   const hairM = new THREE.MeshBasicMaterial({ color: o.hair, side: THREE.DoubleSide });
   const add = (geo, m, x, y, z, parent = rig) => {
     const o3 = new THREE.Mesh(geo, m); o3.position.set(x, y, z); parent.add(o3); return o3;
   };
-  const outlined = (geo, m, x, y, z, parent = rig, k = 1.07) => {
+  const outlined = (geo, m, x, y, z, parent, k) => {
     const o3 = add(geo, m, x, y, z, parent);
     const ol = new THREE.Mesh(geo, LINE_M); ol.scale.setScalar(k); o3.add(ol);
     return o3;
   };
+  /* 몸 타원체의 일부(껍질). k=크기 배율, thS/thL=위에서부터 각도, phS/phL=둘레 각도 */
+  const shell = (k, thS, thL, phS, phL, m) => {
+    const s = new THREE.Mesh(new THREE.SphereGeometry(1, 32, 20, phS, phL, thS, thL), m);
+    s.scale.set(B.rx * k, B.ry * k, B.rz * k);
+    s.position.set(0, B.cy, 0);
+    rig.add(s); return s;
+  };
+  const FULL = 2 * Math.PI;
 
-  /* 몸 (티셔츠 색) + 머리 (흰색) */
-  outlined(new THREE.CapsuleGeometry(0.3, 0.3, 6, 16), shirt, 0, 0.88, 0);
-  outlined(new THREE.SphereGeometry(HEAD_R, 24, 18), white, 0, HEAD_Y, 0, rig, 1.06);
+  /* 몸 + 윤곽선 + 티셔츠(아래쪽을 덮음) */
+  shell(1, 0, Math.PI, 0, FULL, white);
+  shell(1.045, 0, Math.PI, 0, FULL, LINE_M);
+  shell(1.012, 1.78, Math.PI - 1.78, 0, FULL, shirtM);
 
-  /* 얼굴 */
-  const fz = (x, dy) => -Math.sqrt(Math.max(0.01, HEAD_R * HEAD_R - x * x - dy * dy)) - 0.003;
+  /* 얼굴: 몸 앞면(-z)의 곡면에 맞춰 붙임. dy = 몸 중심 기준 높이 */
+  const fz = (x, dy) => {
+    const t = 1 - (x / B.rx) * (x / B.rx) - (dy / B.ry) * (dy / B.ry);
+    return -B.rz * Math.sqrt(Math.max(0.02, t)) - 0.004;
+  };
   const dot = (x, dy, r) => {
-    const d = add(new THREE.SphereGeometry(r, 10, 8), black, x, HEAD_Y + dy, fz(x, dy)); d.scale.z = 0.35; return d;
+    const d = add(new THREE.SphereGeometry(r, 10, 8), black, x, B.cy + dy, fz(x, dy)); d.scale.z = 0.35; return d;
   };
   const arc = (x, dy, r, smile) => {
-    const t = add(new THREE.TorusGeometry(r, 0.011, 6, 14, Math.PI), black, x, HEAD_Y + dy, fz(x, dy));
+    const t = add(new THREE.TorusGeometry(r, 0.013, 6, 14, Math.PI), black, x, B.cy + dy, fz(x, dy));
     if (smile) t.rotation.z = Math.PI;
     return t;
   };
-  const bar = (x, dy, w) => add(new THREE.BoxGeometry(w, 0.014, 0.012), black, x, HEAD_Y + dy, fz(x, dy));
+  const bar = (x, dy, w) => add(new THREE.BoxGeometry(w, 0.016, 0.012), black, x, B.cy + dy, fz(x, dy));
+  const EX = 0.17, EY = 0.2;
   const f = o.face | 0;
-  if (f === 0) { dot(-0.13, 0.01, 0.04); dot(0.13, 0.01, 0.04); arc(0, -0.09, 0.06, true); }
-  else if (f === 1) { arc(-0.13, 0, 0.045, false); arc(0.13, 0, 0.045, false); arc(0, -0.09, 0.06, true); }
-  else if (f === 2) { dot(-0.13, 0.02, 0.05); dot(0.13, 0.02, 0.05); dot(0, -0.12, 0.035); }
-  else if (f === 3) { bar(-0.13, 0.01, 0.09); bar(0.13, 0.01, 0.09); bar(0, -0.11, 0.05); }
-  else if (f === 4) { dot(-0.13, 0.01, 0.04); dot(0.13, 0.01, 0.04); arc(-0.035, -0.09, 0.035, true); arc(0.035, -0.09, 0.035, true); }
-  else { dot(-0.13, 0.01, 0.04); arc(0.13, 0, 0.045, false); arc(0, -0.09, 0.06, true); }
+  if (f === 0) { dot(-EX, EY, 0.05); dot(EX, EY, 0.05); arc(0, 0.13, 0.07, true); }
+  else if (f === 1) { arc(-EX, EY - 0.01, 0.055, false); arc(EX, EY - 0.01, 0.055, false); arc(0, 0.13, 0.07, true); }
+  else if (f === 2) { dot(-EX, EY, 0.06); dot(EX, EY, 0.06); dot(0, 0.06, 0.04); }
+  else if (f === 3) { bar(-EX, EY, 0.12); bar(EX, EY, 0.12); bar(0, 0.07, 0.06); }
+  else if (f === 4) { dot(-EX, EY, 0.05); dot(EX, EY, 0.05); arc(-0.04, 0.115, 0.04, true); arc(0.04, 0.115, 0.04, true); }
+  else { dot(-EX, EY, 0.05); arc(EX, EY - 0.01, 0.055, false); arc(0, 0.13, 0.07, true); }
   if (o.blush) {
     for (const s of [-1, 1]) {
-      const b = add(new THREE.SphereGeometry(0.06, 10, 8), blushM, s * 0.23, HEAD_Y - 0.06, fz(s * 0.23, -0.06));
-      b.scale.set(1.2, 0.7, 0.3);
+      const b = add(new THREE.SphereGeometry(0.07, 10, 8), blushM, s * 0.34, B.cy + 0.09, fz(s * 0.34, 0.09));
+      b.scale.set(1.3, 0.75, 0.3);
     }
   }
 
-  /* 머리카락 */
-  const cap = (r, th, phS, phL) => {
-    const m3 = new THREE.Mesh(new THREE.SphereGeometry(r, 24, 16, phS, phL, 0, th), hairM);
-    m3.position.set(0, HEAD_Y, 0); rig.add(m3); return m3;
-  };
-  const FRONT = 1.5 * Math.PI;                       /* 앞쪽 방향 */
-  const sideBack = (th, gap) => cap(0.43, th, FRONT + gap / 2, 2 * Math.PI - gap);
+  /* 머리카락: 몸 윗부분의 곡면을 따라 덮음 */
+  const FRONT = 1.5 * Math.PI;                                  /* 얼굴 쪽 방향 */
+  const top = (th) => shell(1.035, 0, th, 0, FULL, hairM);       /* 정수리 덮개 */
+  const sideBack = (k, th, gap) => shell(k, 0, th, FRONT + gap / 2, FULL - gap, hairM);  /* 옆/뒤 (앞은 비움) */
   const hs = o.hs | 0;
-  if (hs === 0) {                                    /* 짧은 머리 */
-    cap(0.43, 1.2, 0, 2 * Math.PI); sideBack(1.45, 2.4);
-  } else if (hs === 1) {                             /* 단발 + 앞머리 */
-    cap(0.43, 1.15, 0, 2 * Math.PI);
-    cap(0.435, 1.32, FRONT - 0.8, 1.6);
-    sideBack(2.05, 1.7);
-  } else if (hs === 2) {                             /* 푼 긴 머리 */
-    cap(0.43, 1.15, 0, 2 * Math.PI); sideBack(1.9, 1.9);
-    const c = add(new THREE.SphereGeometry(0.5, 16, 12), hairM, 0, 1.2, 0.28);
-    c.scale.set(0.9, 1.15, 0.42);
-  } else if (hs === 3) {                             /* 포니테일 */
-    cap(0.43, 1.15, 0, 2 * Math.PI); sideBack(1.5, 2.2);
-    const tail = add(new THREE.CapsuleGeometry(0.1, 0.45, 4, 10), hairM, 0, 1.5, 0.47);
-    tail.rotation.x = -0.35;
-    add(new THREE.SphereGeometry(0.065, 10, 8), mat(0xe05050), 0, 1.8, 0.37);
-  } else if (hs === 4) {                             /* 양갈래 */
-    cap(0.43, 1.15, 0, 2 * Math.PI); sideBack(1.5, 2.2);
+  if (hs === 0) {                                               /* 짧은 머리 */
+    top(0.95); sideBack(1.035, 1.25, 2.6);
+    const t = add(new THREE.CapsuleGeometry(0.03, 0.14, 4, 8), hairM, 0.02, 1.76, -0.06); t.rotation.z = 0.45;
+  } else if (hs === 1) {                                        /* 단발 + 앞머리 */
+    top(1.0);
+    shell(1.045, 0, 1.15, FRONT - 0.85, 1.7, hairM);
+    sideBack(1.06, 1.8, 1.9);
+  } else if (hs === 2) {                                        /* 푼 긴 머리 */
+    top(1.0); sideBack(1.07, 2.5, 1.9);
+  } else if (hs === 3) {                                        /* 포니테일 */
+    top(1.0); sideBack(1.04, 1.45, 2.3);
+    add(new THREE.SphereGeometry(0.07, 10, 8), tieM, 0, 1.5, 0.4);
+    const tail = add(new THREE.CapsuleGeometry(0.11, 0.5, 4, 10), hairM, 0, 1.18, 0.57);
+    tail.rotation.x = -0.5;
+  } else if (hs === 4) {                                        /* 양갈래 */
+    top(1.0); sideBack(1.04, 1.45, 2.3);
     for (const s of [-1, 1]) {
-      const t = add(new THREE.CapsuleGeometry(0.09, 0.4, 4, 10), hairM, s * 0.47, 1.5, 0.08);
-      t.rotation.z = s * 0.2;
-      add(new THREE.SphereGeometry(0.06, 10, 8), mat(0xe05050), s * 0.41, 1.78, 0.08);
+      add(new THREE.SphereGeometry(0.065, 10, 8), tieM, s * 0.47, 1.42, 0.12);
+      const t = add(new THREE.CapsuleGeometry(0.1, 0.3, 4, 10), hairM, s * 0.544, 1.18, 0.12);
+      t.rotation.z = s * 0.3;
     }
-  } else {                                           /* 똥머리 */
-    cap(0.43, 1.15, 0, 2 * Math.PI); sideBack(1.5, 2.2);
-    add(new THREE.SphereGeometry(0.17, 14, 10), hairM, 0, 2.0, 0.05);
+  } else {                                                      /* 똥머리 */
+    top(1.0); sideBack(1.04, 1.45, 2.3);
+    const bun = add(new THREE.SphereGeometry(0.2, 14, 10), hairM, 0, 1.86, 0.04);
+    bun.scale.set(1, 0.9, 1);
   }
 
-  /* 팔 / 다리 (짧고 통통하게) */
+  /* 팔 / 다리: 작고 통통하게 몸 가장자리에 바로 붙음 (어깨/엉덩이 축이 몸 안쪽 표면에 있음) */
   const mk = (x, y, r, len) => {
     const p = new THREE.Group(); p.position.set(x, y, 0); rig.add(p);
-    outlined(new THREE.CapsuleGeometry(r, len, 4, 10), white, 0, -(len / 2 + r), 0, p, 1.12);
+    outlined(new THREE.CapsuleGeometry(r, len, 4, 10), white, 0, -(len / 2 + r), 0, p, 1.25);
     return p;
   };
   g.userData = {
     rig,
-    armL: mk(-0.36, 1.18, 0.075, 0.2), armR: mk(0.36, 1.18, 0.075, 0.2),
-    legL: mk(-0.14, 0.45, 0.1, 0.25), legR: mk(0.14, 0.45, 0.1, 0.25),
+    armL: mk(-ARM_X, ARM_Y, 0.08, 0.18), armR: mk(ARM_X, ARM_Y, 0.08, 0.18),
+    legL: mk(-LEG_X, LEG_Y, 0.11, 0.08), legR: mk(LEG_X, LEG_Y, 0.11, 0.08),
   };
   if (name) g.add(makeLabel(name));
   return g;
 }
 function animateAvatar(g, t, speed, emote, et, run) {
   const u = g.userData;
-  u.rig.position.y = 0;
-  u.armL.rotation.set(0, 0, 0); u.armR.rotation.set(0, 0, 0);
+  u.rig.position.y = 0; u.rig.rotation.z = 0;
+  u.armL.position.set(-ARM_X, ARM_Y, 0); u.armR.position.set(ARM_X, ARM_Y, 0);
+  u.armL.rotation.set(0, 0, -0.45); u.armR.rotation.set(0, 0, 0.45);   /* 팔은 살짝 바깥으로 */
   u.legL.rotation.x = 0; u.legR.rotation.x = 0;
   const ep = (serverNow() - et) / 1000;
   if (emote && EMOTE_DUR[emote] && ep >= 0 && ep < EMOTE_DUR[emote]) {
     if (emote === "clap") {
-      const s = (Math.sin(ep * 14) + 1) / 2;
-      u.armL.rotation.x = u.armR.rotation.x = Math.PI * 0.45;
-      u.armL.rotation.z = 0.15 + 0.35 * s; u.armR.rotation.z = -(0.15 + 0.35 * s);
+      const ph = (Math.sin(ep * 14) + 1) / 2;
+      u.armL.position.set(-(0.08 + 0.14 * ph), ARM_Y, -0.45);
+      u.armR.position.set(0.08 + 0.14 * ph, ARM_Y, -0.45);
+      u.armL.rotation.set(Math.PI * 0.5, 0, 0); u.armR.rotation.set(Math.PI * 0.5, 0, 0);
     } else if (emote === "wave") {
-      u.armR.rotation.x = Math.PI * 0.95; u.armR.rotation.z = -0.3 + Math.sin(ep * 10) * 0.4;
+      u.armR.rotation.set(Math.PI * 0.95, 0, 0.5 + Math.sin(ep * 10) * 0.4);
     } else {
       u.armL.rotation.x = u.armR.rotation.x = Math.PI * 0.95 + Math.sin(ep * 12) * 0.2;
       u.rig.position.y = Math.abs(Math.sin(ep * 8)) * 0.25;
@@ -457,9 +471,12 @@ function animateAvatar(g, t, speed, emote, et, run) {
     return;
   }
   const amp = Math.min(1, speed / 0.1) * (run ? 0.9 : 0.6);
-  const s = Math.sin(t * (run ? 14 : 9)) * amp;
+  const w = Math.sin(t * (run ? 14 : 9));
+  const s = w * amp;
   u.legL.rotation.x = s; u.legR.rotation.x = -s;
   u.armL.rotation.x = -s; u.armR.rotation.x = s;
+  u.rig.rotation.z = w * 0.05 * amp;                 /* 뒤뚱뒤뚱 */
+  u.rig.position.y = Math.abs(w) * 0.04 * amp;
 }
 
 /* 밴드 더미 */
@@ -473,345 +490,4 @@ if (SHOW_BAND_DUMMY) {
 /* ============ 8. 충돌 / 높이 ============ */
 function inPlatform(x, z, m) {
   for (const p of PLATFORMS)
-    if (Math.abs(x - p.cx) < p.hw + m && Math.abs(z - p.cz) < p.hd + m) return true;
-  return false;
-}
-function blocked(x, z) {
-  const r = Math.hypot(x, z);
-  if (r > 190) return true;
-  const th = Math.atan2(x, z);
-  if (Math.abs(r - R_WALL - 0.2) < 0.7 && Math.abs(th) >= GATE) return true;
-  if (inPlatform(x, z, 0.8)) return true;
-  if (z < -BACK_HALF && Math.abs(x) < 46) return true;
-  return false;
-}
-function heightAt(x, z) {
-  const r = Math.hypot(x, z);
-  if (r < R_FLOOR || r >= R_STAND_OUT) return 0;
-  if (!standExists(segTheta(Math.atan2(x, z)))) return 0;
-  return Math.min(ROWS, Math.floor((r - R_FLOOR) / STEP_R) + 1) * ROW_H;
-}
-
-/* ============ 9. 플레이어 상태 / 입력 ============ */
-const me = { x: 0, y: 0, z: 128, vy: 0, ry: 0, speed: 0, onGround: true };
-let yaw = 0, pitch = 0, firstPerson = false, running = false;
-let myName = "", myEm = "", myEt = 0;
-const JUMP_POWER = 0.23, GRAV = 0.01;
-const avatar = { g: null };
-
-/* 꾸미기 값 (face 0~5, hs 머리모양 0~5, blush 볼터치) */
-const cust = { shirt: "#ffffff", hair: "#4a3426", face: 0, hs: 0, blush: false };
-try {
-  const s = JSON.parse(localStorage.getItem("lucyCust2") || "null");
-  if (s) {
-    if (SHIRT_COLORS.includes(s.shirt)) cust.shirt = s.shirt;
-    if (HAIR_COLORS.includes(s.hair)) cust.hair = s.hair;
-    if (Number.isInteger(s.face) && s.face >= 0 && s.face < FACES.length) cust.face = s.face;
-    if (Number.isInteger(s.hs) && s.hs >= 0 && s.hs < HAIRS.length) cust.hs = s.hs;
-    cust.blush = !!s.blush;
-  }
-} catch (e) {}
-const saveCust = () => { try { localStorage.setItem("lucyCust2", JSON.stringify(cust)); } catch (e) {} };
-const avatarOpts = () => ({ shirt: hexOf(cust.shirt), hair: hexOf(cust.hair), face: cust.face, blush: cust.blush, hs: cust.hs });
-
-/* 조이스틱 */
-let jx = 0, jy = 0, joyId = null;
-{
-  const joy = $("joy"), knob = $("knob");
-  joy.style.touchAction = "none";
-  const R = 40;
-  const upd = (e) => {
-    const r = joy.getBoundingClientRect();
-    let dx = e.clientX - (r.left + r.width / 2), dy = e.clientY - (r.top + r.height / 2);
-    const l = Math.hypot(dx, dy);
-    if (l > R) { dx = dx / l * R; dy = dy / l * R; }
-    knob.style.transform = `translate(${dx}px,${dy}px)`;
-    jx = dx / R; jy = -dy / R;
-  };
-  joy.addEventListener("pointerdown", (e) => { joyId = e.pointerId; joy.setPointerCapture(e.pointerId); upd(e); e.preventDefault(); });
-  joy.addEventListener("pointermove", (e) => { if (e.pointerId === joyId) upd(e); });
-  const end = (e) => { if (e.pointerId === joyId) { joyId = null; jx = jy = 0; knob.style.transform = "translate(0,0)"; } };
-  joy.addEventListener("pointerup", end); joy.addEventListener("pointercancel", end);
-}
-/* 시점 드래그 */
-{
-  let id = null, lx = 0, ly = 0;
-  canvas.addEventListener("pointerdown", (e) => {
-    id = e.pointerId; lx = e.clientX; ly = e.clientY;
-    try { canvas.setPointerCapture(id); } catch (err) {}
-  });
-  canvas.addEventListener("pointermove", (e) => {
-    if (e.pointerId !== id) return;
-    const dx = e.clientX - lx, dy = e.clientY - ly; lx = e.clientX; ly = e.clientY;
-    const flip = Math.cos(pitch) < 0 ? -1 : 1;
-    yaw -= dx * 0.005 * flip;
-    pitch = wrapAngle(pitch - dy * 0.005);
-  });
-  const end = (e) => { if (e.pointerId === id) id = null; };
-  canvas.addEventListener("pointerup", end);
-  canvas.addEventListener("pointercancel", end);
-  canvas.addEventListener("lostpointercapture", end);
-  addEventListener("pointerup", end);
-  addEventListener("pointercancel", end);
-  addEventListener("blur", () => { id = null; });
-  document.addEventListener("visibilitychange", () => { id = null; });
-}
-/* 버튼 */
-$("jumpBtn").addEventListener("pointerdown", (e) => { e.preventDefault(); if (me.onGround) { me.vy = JUMP_POWER; me.onGround = false; } });
-$("viewBtn").addEventListener("click", () => {
-  firstPerson = !firstPerson;
-  $("viewBtn").textContent = firstPerson ? "1인칭" : "3인칭";
-});
-$("runBtn").addEventListener("click", () => {
-  running = !running;
-  $("runBtn").textContent = running ? "달리기 ON" : "달리기";
-  $("runBtn").style.background = running ? "rgba(255,120,60,.8)" : "";
-});
-document.querySelectorAll("#emotes [data-emote]").forEach((b) => {
-  b.addEventListener("click", () => {
-    if (!inGame) return;
-    myEm = b.dataset.emote; myEt = serverNow(); sendState(true);
-  });
-});
-
-/* ============ 10. 온라인 플레이어 ============ */
-const remotes = {};
-let lastPlayers = {};
-const sigOf = (d) => [d.name, d.c, d.hc, d.f, d.b, d.h].join("|");
-function spawnRemote(d) {
-  const g = makeAvatar(d.name || "관객", {
-    shirt: hexOf(d.c, "#ffffff"), hair: hexOf(d.hc, "#4a3426"),
-    face: d.f | 0, blush: !!d.b, hs: d.h | 0
-  });
-  g.position.set(d.x || 0, d.y || 0, d.z || 0);
-  scene.add(g);
-  return { g, sig: sigOf(d), speed: 0 };
-}
-function applyPlayers(v) {
-  for (const id of Object.keys(remotes)) {
-    if (!v[id]) { scene.remove(remotes[id].g); delete remotes[id]; }
-  }
-  if (!inGame) return;
-  for (const id of Object.keys(v)) {
-    if (id === myId) continue;
-    const d = v[id];
-    if (!d) continue;
-    let r = remotes[id];
-    if (!r || r.sig !== sigOf(d)) {
-      if (r) scene.remove(r.g);
-      r = remotes[id] = spawnRemote(d);
-    }
-    Object.assign(r, { tx: d.x || 0, ty: d.y || 0, tz: d.z || 0, try_: d.ry || 0, em: d.em || "", et: d.et || 0, t: d.t || serverNow() });
-  }
-}
-ready.then(() => {
-  onValue(playersRef, (snap) => { lastPlayers = snap.val() || {}; applyPlayers(lastPlayers); });
-});
-
-let lastSend = 0, lastForce = 0, lastSent = "";
-function sendState(force) {
-  if (!inGame || !myRef) return;
-  const n = performance.now();
-  if (!force && n - lastSend < 100) return;
-  const key = [me.x.toFixed(2), me.y.toFixed(2), me.z.toFixed(2), me.ry.toFixed(2), myEm, myEt].join();
-  if (!force && key === lastSent && n - lastForce < 5000) return;
-  lastSend = n; lastSent = key; if (n - lastForce >= 5000) lastForce = n;
-  set(myRef, {
-    name: myName, c: cust.shirt, hc: cust.hair, f: cust.face, h: cust.hs, b: cust.blush ? 1 : 0,
-    x: me.x, y: me.y, z: me.z, ry: me.ry, em: myEm, et: myEt, t: serverTimestamp()
-  }).catch((e) => { console.log("저장 실패", e); });
-}
-function leave() { if (myRef) { try { remove(myRef); } catch (e) {} } }
-addEventListener("pagehide", leave);
-
-/* ============ 10.5 꾸미기 화면 (이름 입력 화면에 자동 추가) ============ */
-let pRenderer = null, pScene = null, pCam = null, pAvatar = null;
-function rebuildPreview() {
-  if (!pScene) return;
-  if (pAvatar) pScene.remove(pAvatar);
-  pAvatar = makeAvatar("", avatarOpts());
-  pScene.add(pAvatar);
-}
-function buildCustomUI() {
-  const enterBtn = $("enterBtn");
-  if (!enterBtn || !enterBtn.parentNode) return;
-  const panel = document.createElement("div");
-  panel.style.cssText = "display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:12px;margin:10px auto;color:#fff;font:600 13px sans-serif;max-width:520px;";
-
-  const pc = document.createElement("canvas");
-  pc.style.cssText = "width:150px;height:190px;border-radius:14px;background:rgba(255,255,255,.12);flex:none;";
-  panel.appendChild(pc);
-  pRenderer = new THREE.WebGLRenderer({ canvas: pc, alpha: true, antialias: true });
-  pRenderer.setPixelRatio(2);
-  pRenderer.setSize(150, 190, false);
-  pScene = new THREE.Scene();
-  pCam = new THREE.PerspectiveCamera(35, 150 / 190, 0.1, 50);
-  pCam.position.set(0, 1.15, 5.0);
-  pCam.lookAt(0, 1.0, 0);
-  rebuildPreview();
-
-  const col = document.createElement("div");
-  col.style.cssText = "display:flex;flex-direction:column;gap:6px;align-items:flex-start;";
-  panel.appendChild(col);
-  const row = (label) => {
-    const wrap = document.createElement("div");
-    wrap.style.cssText = "display:flex;align-items:center;gap:5px;flex-wrap:wrap;max-width:330px;";
-    const l = document.createElement("span"); l.textContent = label; l.style.cssText = "min-width:44px;opacity:.85;";
-    wrap.appendChild(l); col.appendChild(wrap); return wrap;
-  };
-  const faceRow = row("표정");
-  const blushRow = row("볼터치");
-  const hairRow = row("머리");
-  const hcRow = row("머리색");
-  const shirtRow = row("옷 색");
-  const faceBtns = [], hairBtns = [], hcBtns = [], shirtBtns = [];
-  const blushBtn = document.createElement("button");
-  const OFF = "rgba(255,255,255,.25)";
-  const mark = () => {
-    faceBtns.forEach((b, i) => b.style.borderColor = i === cust.face ? "#fff" : OFF);
-    hairBtns.forEach((b, i) => b.style.borderColor = i === cust.hs ? "#fff" : OFF);
-    hcBtns.forEach((b, i) => b.style.borderColor = HAIR_COLORS[i] === cust.hair ? "#fff" : OFF);
-    shirtBtns.forEach((b, i) => b.style.borderColor = SHIRT_COLORS[i] === cust.shirt ? "#fff" : OFF);
-    blushBtn.style.borderColor = cust.blush ? "#fff" : OFF;
-    blushBtn.textContent = cust.blush ? "있음" : "없음";
-  };
-  const changed = () => { saveCust(); rebuildPreview(); mark(); };
-  const textBtn = (label, arr, rowEl, onClick) => {
-    const b = document.createElement("button");
-    b.textContent = label; b.type = "button";
-    b.style.cssText = "min-width:40px;height:32px;padding:0 8px;border-radius:10px;border:3px solid;background:rgba(0,0,0,.35);color:#fff;font:600 13px sans-serif;";
-    b.addEventListener("click", onClick);
-    rowEl.appendChild(b); if (arr) arr.push(b); return b;
-  };
-  FACES.forEach((f, i) => textBtn(f, faceBtns, faceRow, () => { cust.face = i; changed(); }));
-  HAIRS.forEach((h, i) => textBtn(h, hairBtns, hairRow, () => { cust.hs = i; changed(); }));
-  blushBtn.type = "button";
-  blushBtn.style.cssText = "min-width:56px;height:32px;padding:0 8px;border-radius:10px;border:3px solid;background:rgba(0,0,0,.35);color:#fff;font:600 13px sans-serif;";
-  blushBtn.addEventListener("click", () => { cust.blush = !cust.blush; changed(); });
-  blushRow.appendChild(blushBtn);
-  const sw = (arr, list, key, rowEl) => list.forEach((c) => {
-    const b = document.createElement("button");
-    b.type = "button";
-    b.style.cssText = `width:26px;height:26px;border-radius:50%;border:3px solid;background:${c};padding:0;`;
-    b.addEventListener("click", () => { cust[key] = c; changed(); });
-    rowEl.appendChild(b); arr.push(b);
-  });
-  sw(hcBtns, HAIR_COLORS, "hair", hcRow);
-  sw(shirtBtns, SHIRT_COLORS, "shirt", shirtRow);
-  mark();
-  enterBtn.parentNode.insertBefore(panel, enterBtn);
-}
-try { buildCustomUI(); } catch (e) { console.log("꾸미기 UI 오류", e); }
-
-/* ============ 11. 입장 / 나가기 ============ */
-let entering = false;
-$("enterBtn").addEventListener("click", async () => {
-  if (entering || inGame) return;
-  entering = true;
-  try {
-    try { await ready; } catch (e) { toast("서버 연결에 실패했어요. 새로고침 해 주세요."); return; }
-    let nm = ($("nick").value || "").trim().slice(0, 12);
-    if (!nm) nm = "관객" + Math.floor(Math.random() * 900 + 100);
-    myName = nm;
-    saveCust();
-    Object.assign(me, { x: (Math.random() - 0.5) * 8, y: 0, z: 128, vy: 0, ry: Math.PI, speed: 0, onGround: true });
-    yaw = 0; pitch = 0; myEm = ""; myEt = 0;
-    if (avatar.g) scene.remove(avatar.g);
-    avatar.g = makeAvatar("", avatarOpts());
-    scene.add(avatar.g);
-    inGame = true;
-    document.body.classList.add("in");
-    $("enter").style.display = "none";
-    $("viewBtn").textContent = firstPerson ? "1인칭" : "3인칭";
-    $("ctlBtn").textContent = "화면 조작 OFF";
-    try { await ensureVideoStart(); } catch (e) { videoStart = serverNow(); }
-    try { onDisconnect(myRef).remove(); } catch (e) {}
-    sendState(true);
-    syncVideo();
-    applyPlayers(lastPlayers);
-  } finally {
-    entering = false;
-  }
-});
-$("exitBtn").addEventListener("click", () => {
-  inGame = false;
-  setCtl(false);
-  try { yt && yt.pauseVideo(); } catch (e) {}
-  if (myRef) remove(myRef).catch(() => {});
-  for (const id of Object.keys(remotes)) { scene.remove(remotes[id].g); delete remotes[id]; }
-  if (avatar.g) { scene.remove(avatar.g); avatar.g = null; }
-  running = false; $("runBtn").textContent = "달리기"; $("runBtn").style.background = "";
-  document.body.classList.remove("in");
-  $("enter").style.display = "";
-});
-
-/* ============ 12. 메인 루프 ============ */
-addEventListener("resize", () => {
-  renderer.setSize(innerWidth, innerHeight);
-  camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
-});
-let last = performance.now();
-function animate() {
-  requestAnimationFrame(animate);
-  const now = performance.now();
-  const dt = Math.min((now - last) / 1000, 0.1); last = now;
-  const k = dt * 60, T = now / 1000;
-
-  if (inGame && avatar.g) {
-    const sp = running ? RUN_SPEED : WALK_SPEED;
-    const fx = -Math.sin(yaw), fz = -Math.cos(yaw), rx = Math.cos(yaw), rz = -Math.sin(yaw);
-    let mx = fx * jy + rx * jx, mz = fz * jy + rz * jx;
-    const ml = Math.hypot(mx, mz);
-    if (ml > 1) { mx /= ml; mz /= ml; }
-    mx *= sp * k; mz *= sp * k;
-    const ox = me.x, oz = me.z;
-    const nx = me.x + mx, nz = me.z + mz;
-    if (!blocked(nx, me.z) && heightAt(nx, me.z) <= me.y + STEP_UP) me.x = nx;
-    if (!blocked(me.x, nz) && heightAt(me.x, nz) <= me.y + STEP_UP) me.z = nz;
-    if (ml > 0.05) me.ry = Math.atan2(-mx, -mz);
-    me.speed = Math.hypot(me.x - ox, me.z - oz) / Math.max(k, 0.001);
-
-    me.vy -= GRAV * k; me.y += me.vy * k;
-    const gh = heightAt(me.x, me.z);
-    if (me.y <= gh) { me.y = gh; me.vy = 0; me.onGround = true; } else me.onGround = false;
-
-    const g = avatar.g;
-    g.position.set(me.x, me.y, me.z); g.rotation.y = me.ry; g.visible = !firstPerson;
-    const em = myEm && (serverNow() - myEt) / 1000 < (EMOTE_DUR[myEm] || 0) ? myEm : "";
-    animateAvatar(g, T, me.speed, em, myEt, running);
-
-    const hy = me.y + 1.6;
-    if (firstPerson) {
-      camera.position.set(me.x, hy + 0.3, me.z);
-    } else {
-      const f = new THREE.Vector3(-Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), -Math.cos(yaw) * Math.cos(pitch));
-      const cx = me.x - f.x * 9, cy = hy - f.y * 9, cz = me.z - f.z * 9;
-      camera.position.set(cx, Math.max(cy, heightAt(cx, cz) + 0.4), cz);
-    }
-    camera.rotation.set(pitch, yaw, 0);
-    sendState(false);
-
-    for (const id of Object.keys(remotes)) {
-      const r = remotes[id];
-      if (r.tx === undefined) continue;
-      const px = r.g.position.x, pz = r.g.position.z;
-      r.g.position.x += (r.tx - px) * 0.2; r.g.position.y += (r.ty - r.g.position.y) * 0.2; r.g.position.z += (r.tz - pz) * 0.2;
-      const dr = wrapAngle(r.try_ - r.g.rotation.y); r.g.rotation.y += dr * 0.2;
-      const spd = Math.hypot(r.g.position.x - px, r.g.position.z - pz) / Math.max(k, 0.001);
-      r.speed += (spd - r.speed) * 0.3;
-      r.g.visible = serverNow() - r.t < 30000;   // 30초 넘게 신호 없으면 숨김
-      animateAvatar(r.g, T, r.speed, r.em, r.et, r.speed > 0.25);
-    }
-  } else {
-    camera.position.set(0, 12, 150);
-    camera.rotation.set(-0.05, Math.sin(T * 0.1) * 0.15, 0);
-    if (pRenderer && pAvatar) {
-      pAvatar.rotation.y = Math.PI + Math.sin(T * 0.8) * 0.6;
-      pRenderer.render(pScene, pCam);
-    }
-  }
-
-  updateVideoQuad();
-  renderer.render(scene, camera);
-}
-animate();
+    if (Math.abs(x - p.cx) < p.hw + m && Math.abs(z - p.cz)
