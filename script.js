@@ -490,4 +490,345 @@ if (SHOW_BAND_DUMMY) {
 /* ============ 8. 충돌 / 높이 ============ */
 function inPlatform(x, z, m) {
   for (const p of PLATFORMS)
-    if (Math.abs(x - p.cx) < p.hw + m && Math.abs(z - p.cz)
+    if (Math.abs(x - p.cx) < p.hw + m && Math.abs(z - p.cz) < p.hd + m) return true;
+  return false;
+}
+function blocked(x, z) {
+  const r = Math.hypot(x, z);
+  if (r > 190) return true;
+  const th = Math.atan2(x, z);
+  if (Math.abs(r - R_WALL - 0.2) < 0.7 && Math.abs(th) >= GATE) return true;
+  if (inPlatform(x, z, 0.8)) return true;
+  if (z < -BACK_HALF && Math.abs(x) < 46) return true;
+  return false;
+}
+function heightAt(x, z) {
+  const r = Math.hypot(x, z);
+  if (r < R_FLOOR || r >= R_STAND_OUT) return 0;
+  if (!standExists(segTheta(Math.atan2(x, z)))) return 0;
+  return Math.min(ROWS, Math.floor((r - R_FLOOR) / STEP_R) + 1) * ROW_H;
+}
+
+/* ============ 9. 플레이어 상태 / 입력 ============ */
+const me = { x: 0, y: 0, z: 128, vy: 0, ry: 0, speed: 0, onGround: true };
+let yaw = 0, pitch = 0, firstPerson = false, running = false;
+let myName = "", myEm = "", myEt = 0;
+const JUMP_POWER = 0.23, GRAV = 0.01;
+const avatar = { g: null };
+
+/* 꾸미기 값 (face 0~5, hs 머리모양 0~5, blush 볼터치) */
+const cust = { shirt: "#ffffff", hair: "#4a3426", face: 0, hs: 0, blush: false };
+try {
+  const s = JSON.parse(localStorage.getItem("lucyCust2") || "null");
+  if (s) {
+    if (SHIRT_COLORS.includes(s.shirt)) cust.shirt = s.shirt;
+    if (HAIR_COLORS.includes(s.hair)) cust.hair = s.hair;
+    if (Number.isInteger(s.face) && s.face >= 0 && s.face < FACES.length) cust.face = s.face;
+    if (Number.isInteger(s.hs) && s.hs >= 0 && s.hs < HAIRS.length) cust.hs = s.hs;
+    cust.blush = !!s.blush;
+  }
+} catch (e) {}
+const saveCust = () => { try { localStorage.setItem("lucyCust2", JSON.stringify(cust)); } catch (e) {} };
+const avatarOpts = () => ({ shirt: hexOf(cust.shirt), hair: hexOf(cust.hair), face: cust.face, blush: cust.blush, hs: cust.hs });
+
+/* 조이스틱 */
+let jx = 0, jy = 0, joyId = null;
+{
+  const joy = $("joy"), knob = $("knob");
+  joy.style.touchAction = "none";
+  const R = 40;
+  const upd = (e) => {
+    const r = joy.getBoundingClientRect();
+    let dx = e.clientX - (r.left + r.width / 2), dy = e.clientY - (r.top + r.height / 2);
+    const l = Math.hypot(dx, dy);
+    if (l > R) { dx = dx / l * R; dy = dy / l * R; }
+    knob.style.transform = `translate(${dx}px,${dy}px)`;
+    jx = dx / R; jy = -dy / R;
+  };
+  joy.addEventListener("pointerdown", (e) => { joyId = e.pointerId; joy.setPointerCapture(e.pointerId); upd(e); e.preventDefault(); });
+  joy.addEventListener("pointermove", (e) => { if (e.pointerId === joyId) upd(e); });
+  const end = (e) => { if (e.pointerId === joyId) { joyId = null; jx = jy = 0; knob.style.transform = "translate(0,0)"; } };
+  joy.addEventListener("pointerup", end); joy.addEventListener("pointercancel", end);
+}
+/* 시점 드래그 */
+{
+  let id = null, lx = 0, ly = 0;
+  canvas.addEventListener("pointerdown", (e) => {
+    id = e.pointerId; lx = e.clientX; ly = e.clientY;
+    try { canvas.setPointerCapture(id); } catch (err) {}
+  });
+  canvas.addEventListener("pointermove", (e) => {
+    if (e.pointerId !== id) return;
+    const dx = e.clientX - lx, dy = e.clientY - ly; lx = e.clientX; ly = e.clientY;
+    const flip = Math.cos(pitch) < 0 ? -1 : 1;
+    yaw -= dx * 0.005 * flip;
+    pitch = wrapAngle(pitch - dy * 0.005);
+  });
+  const end = (e) => { if (e.pointerId === id) id = null; };
+  canvas.addEventListener("pointerup", end);
+  canvas.addEventListener("pointercancel", end);
+  canvas.addEventListener("lostpointercapture", end);
+  addEventListener("pointerup", end);
+  addEventListener("pointercancel", end);
+  addEventListener("blur", () => { id = null; });
+  document.addEventListener("visibilitychange", () => { id = null; });
+}
+/* 버튼 */
+$("jumpBtn").addEventListener("pointerdown", (e) => { e.preventDefault(); if (me.onGround) { me.vy = JUMP_POWER; me.onGround = false; } });
+$("viewBtn").addEventListener("click", () => {
+  firstPerson = !firstPerson;
+  $("viewBtn").textContent = firstPerson ? "1인칭" : "3인칭";
+});
+$("runBtn").addEventListener("click", () => {
+  running = !running;
+  $("runBtn").textContent = running ? "달리기 ON" : "달리기";
+  $("runBtn").style.background = running ? "rgba(255,120,60,.8)" : "";
+});
+document.querySelectorAll("#emotes [data-emote]").forEach((b) => {
+  b.addEventListener("click", () => {
+    if (!inGame) return;
+    myEm = b.dataset.emote; myEt = serverNow(); sendState(true);
+  });
+});
+
+/* ============ 10. 온라인 플레이어 ============ */
+const remotes = {};
+let lastPlayers = {};
+const sigOf = (d) => [d.name, d.c, d.hc, d.f, d.b, d.h].join("|");
+function spawnRemote(d) {
+  const g = makeAvatar(d.name || "관객", {
+    shirt: hexOf(d.c, "#ffffff"), hair: hexOf(d.hc, "#4a3426"),
+    face: d.f | 0, blush: !!d.b, hs: d.h | 0
+  });
+  g.position.set(d.x || 0, d.y || 0, d.z || 0);
+  scene.add(g);
+  return { g, sig: sigOf(d), speed: 0 };
+}
+function applyPlayers(v) {
+  for (const id of Object.keys(remotes)) {
+    if (!v[id]) { scene.remove(remotes[id].g); delete remotes[id]; }
+  }
+  if (!inGame) return;
+  for (const id of Object.keys(v)) {
+    if (id === myId) continue;
+    const d = v[id];
+    if (!d) continue;
+    let r = remotes[id];
+    if (!r || r.sig !== sigOf(d)) {
+      if (r) scene.remove(r.g);
+      r = remotes[id] = spawnRemote(d);
+    }
+    Object.assign(r, { tx: d.x || 0, ty: d.y || 0, tz: d.z || 0, try_: d.ry || 0, em: d.em || "", et: d.et || 0, t: d.t || serverNow() });
+  }
+}
+ready.then(() => {
+  onValue(playersRef, (snap) => { lastPlayers = snap.val() || {}; applyPlayers(lastPlayers); });
+});
+
+let lastSend = 0, lastForce = 0, lastSent = "";
+function sendState(force) {
+  if (!inGame || !myRef) return;
+  const n = performance.now();
+  if (!force && n - lastSend < 100) return;
+  const key = [me.x.toFixed(2), me.y.toFixed(2), me.z.toFixed(2), me.ry.toFixed(2), myEm, myEt].join();
+  if (!force && key === lastSent && n - lastForce < 5000) return;
+  lastSend = n; lastSent = key; if (n - lastForce >= 5000) lastForce = n;
+  set(myRef, {
+    name: myName, c: cust.shirt, hc: cust.hair, f: cust.face, h: cust.hs, b: cust.blush ? 1 : 0,
+    x: me.x, y: me.y, z: me.z, ry: me.ry, em: myEm, et: myEt, t: serverTimestamp()
+  }).catch((e) => { console.log("저장 실패", e); });
+}
+function leave() { if (myRef) { try { remove(myRef); } catch (e) {} } }
+addEventListener("pagehide", leave);
+
+/* ============ 10.5 꾸미기 화면 (이름 입력 화면에 자동 추가) ============ */
+let pRenderer = null, pScene = null, pCam = null, pAvatar = null;
+function rebuildPreview() {
+  if (!pScene) return;
+  if (pAvatar) pScene.remove(pAvatar);
+  pAvatar = makeAvatar("", avatarOpts());
+  pScene.add(pAvatar);
+}
+function buildCustomUI() {
+  const enterBtn = $("enterBtn");
+  if (!enterBtn || !enterBtn.parentNode) return;
+  const panel = document.createElement("div");
+  panel.style.cssText = "display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:12px;margin:10px auto;color:#fff;font:600 13px sans-serif;max-width:520px;";
+
+  const pc = document.createElement("canvas");
+  pc.style.cssText = "width:150px;height:190px;border-radius:14px;background:rgba(255,255,255,.12);flex:none;";
+  panel.appendChild(pc);
+  pRenderer = new THREE.WebGLRenderer({ canvas: pc, alpha: true, antialias: true });
+  pRenderer.setPixelRatio(2);
+  pRenderer.setSize(150, 190, false);
+  pScene = new THREE.Scene();
+  pCam = new THREE.PerspectiveCamera(35, 150 / 190, 0.1, 50);
+  pCam.position.set(0, 1.05, 5.0);
+  pCam.lookAt(0, 1.0, 0);
+  rebuildPreview();
+
+  const col = document.createElement("div");
+  col.style.cssText = "display:flex;flex-direction:column;gap:6px;align-items:flex-start;";
+  panel.appendChild(col);
+  const row = (label) => {
+    const wrap = document.createElement("div");
+    wrap.style.cssText = "display:flex;align-items:center;gap:5px;flex-wrap:wrap;max-width:330px;";
+    const l = document.createElement("span"); l.textContent = label; l.style.cssText = "min-width:44px;opacity:.85;";
+    wrap.appendChild(l); col.appendChild(wrap); return wrap;
+  };
+  const faceRow = row("표정");
+  const blushRow = row("볼터치");
+  const hairRow = row("머리");
+  const hcRow = row("머리색");
+  const shirtRow = row("옷 색");
+  const faceBtns = [], hairBtns = [], hcBtns = [], shirtBtns = [];
+  const blushBtn = document.createElement("button");
+  const OFF = "rgba(255,255,255,.25)";
+  const mark = () => {
+    faceBtns.forEach((b, i) => b.style.borderColor = i === cust.face ? "#fff" : OFF);
+    hairBtns.forEach((b, i) => b.style.borderColor = i === cust.hs ? "#fff" : OFF);
+    hcBtns.forEach((b, i) => b.style.borderColor = HAIR_COLORS[i] === cust.hair ? "#fff" : OFF);
+    shirtBtns.forEach((b, i) => b.style.borderColor = SHIRT_COLORS[i] === cust.shirt ? "#fff" : OFF);
+    blushBtn.style.borderColor = cust.blush ? "#fff" : OFF;
+    blushBtn.textContent = cust.blush ? "있음" : "없음";
+  };
+  const changed = () => { saveCust(); rebuildPreview(); mark(); };
+  const textBtn = (label, arr, rowEl, onClick) => {
+    const b = document.createElement("button");
+    b.textContent = label; b.type = "button";
+    b.style.cssText = "min-width:40px;height:32px;padding:0 8px;border-radius:10px;border:3px solid;background:rgba(0,0,0,.35);color:#fff;font:600 13px sans-serif;";
+    b.addEventListener("click", onClick);
+    rowEl.appendChild(b); if (arr) arr.push(b); return b;
+  };
+  FACES.forEach((f, i) => textBtn(f, faceBtns, faceRow, () => { cust.face = i; changed(); }));
+  HAIRS.forEach((h, i) => textBtn(h, hairBtns, hairRow, () => { cust.hs = i; changed(); }));
+  blushBtn.type = "button";
+  blushBtn.style.cssText = "min-width:56px;height:32px;padding:0 8px;border-radius:10px;border:3px solid;background:rgba(0,0,0,.35);color:#fff;font:600 13px sans-serif;";
+  blushBtn.addEventListener("click", () => { cust.blush = !cust.blush; changed(); });
+  blushRow.appendChild(blushBtn);
+  const sw = (arr, list, key, rowEl) => list.forEach((c) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.style.cssText = `width:26px;height:26px;border-radius:50%;border:3px solid;background:${c};padding:0;`;
+    b.addEventListener("click", () => { cust[key] = c; changed(); });
+    rowEl.appendChild(b); arr.push(b);
+  });
+  sw(hcBtns, HAIR_COLORS, "hair", hcRow);
+  sw(shirtBtns, SHIRT_COLORS, "shirt", shirtRow);
+  mark();
+  enterBtn.parentNode.insertBefore(panel, enterBtn);
+}
+try { buildCustomUI(); } catch (e) { console.log("꾸미기 UI 오류", e); }
+
+/* ============ 11. 입장 / 나가기 ============ */
+let entering = false;
+$("enterBtn").addEventListener("click", async () => {
+  if (entering || inGame) return;
+  entering = true;
+  try {
+    try { await ready; } catch (e) { toast("서버 연결에 실패했어요. 새로고침 해 주세요."); return; }
+    let nm = ($("nick").value || "").trim().slice(0, 12);
+    if (!nm) nm = "관객" + Math.floor(Math.random() * 900 + 100);
+    myName = nm;
+    saveCust();
+    Object.assign(me, { x: (Math.random() - 0.5) * 8, y: 0, z: 128, vy: 0, ry: Math.PI, speed: 0, onGround: true });
+    yaw = 0; pitch = 0; myEm = ""; myEt = 0;
+    if (avatar.g) scene.remove(avatar.g);
+    avatar.g = makeAvatar("", avatarOpts());
+    scene.add(avatar.g);
+    inGame = true;
+    document.body.classList.add("in");
+    $("enter").style.display = "none";
+    $("viewBtn").textContent = firstPerson ? "1인칭" : "3인칭";
+    $("ctlBtn").textContent = "화면 조작 OFF";
+    try { await ensureVideoStart(); } catch (e) { videoStart = serverNow(); }
+    try { onDisconnect(myRef).remove(); } catch (e) {}
+    sendState(true);
+    syncVideo();
+    applyPlayers(lastPlayers);
+  } finally {
+    entering = false;
+  }
+});
+$("exitBtn").addEventListener("click", () => {
+  inGame = false;
+  setCtl(false);
+  try { yt && yt.pauseVideo(); } catch (e) {}
+  if (myRef) remove(myRef).catch(() => {});
+  for (const id of Object.keys(remotes)) { scene.remove(remotes[id].g); delete remotes[id]; }
+  if (avatar.g) { scene.remove(avatar.g); avatar.g = null; }
+  running = false; $("runBtn").textContent = "달리기"; $("runBtn").style.background = "";
+  document.body.classList.remove("in");
+  $("enter").style.display = "";
+});
+
+/* ============ 12. 메인 루프 ============ */
+addEventListener("resize", () => {
+  renderer.setSize(innerWidth, innerHeight);
+  camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
+});
+let last = performance.now();
+function animate() {
+  requestAnimationFrame(animate);
+  const now = performance.now();
+  const dt = Math.min((now - last) / 1000, 0.1); last = now;
+  const k = dt * 60, T = now / 1000;
+
+  if (inGame && avatar.g) {
+    const sp = running ? RUN_SPEED : WALK_SPEED;
+    const fx = -Math.sin(yaw), fz = -Math.cos(yaw), rx = Math.cos(yaw), rz = -Math.sin(yaw);
+    let mx = fx * jy + rx * jx, mz = fz * jy + rz * jx;
+    const ml = Math.hypot(mx, mz);
+    if (ml > 1) { mx /= ml; mz /= ml; }
+    mx *= sp * k; mz *= sp * k;
+    const ox = me.x, oz = me.z;
+    const nx = me.x + mx, nz = me.z + mz;
+    if (!blocked(nx, me.z) && heightAt(nx, me.z) <= me.y + STEP_UP) me.x = nx;
+    if (!blocked(me.x, nz) && heightAt(me.x, nz) <= me.y + STEP_UP) me.z = nz;
+    if (ml > 0.05) me.ry = Math.atan2(-mx, -mz);
+    me.speed = Math.hypot(me.x - ox, me.z - oz) / Math.max(k, 0.001);
+
+    me.vy -= GRAV * k; me.y += me.vy * k;
+    const gh = heightAt(me.x, me.z);
+    if (me.y <= gh) { me.y = gh; me.vy = 0; me.onGround = true; } else me.onGround = false;
+
+    const g = avatar.g;
+    g.position.set(me.x, me.y, me.z); g.rotation.y = me.ry; g.visible = !firstPerson;
+    const em = myEm && (serverNow() - myEt) / 1000 < (EMOTE_DUR[myEm] || 0) ? myEm : "";
+    animateAvatar(g, T, me.speed, em, myEt, running);
+
+    const hy = me.y + 1.5;
+    if (firstPerson) {
+      camera.position.set(me.x, hy + 0.1, me.z);
+    } else {
+      const f = new THREE.Vector3(-Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), -Math.cos(yaw) * Math.cos(pitch));
+      const cx = me.x - f.x * 9, cy = hy - f.y * 9, cz = me.z - f.z * 9;
+      camera.position.set(cx, Math.max(cy, heightAt(cx, cz) + 0.4), cz);
+    }
+    camera.rotation.set(pitch, yaw, 0);
+    sendState(false);
+
+    for (const id of Object.keys(remotes)) {
+      const r = remotes[id];
+      if (r.tx === undefined) continue;
+      const px = r.g.position.x, pz = r.g.position.z;
+      r.g.position.x += (r.tx - px) * 0.2; r.g.position.y += (r.ty - r.g.position.y) * 0.2; r.g.position.z += (r.tz - pz) * 0.2;
+      const dr = wrapAngle(r.try_ - r.g.rotation.y); r.g.rotation.y += dr * 0.2;
+      const spd = Math.hypot(r.g.position.x - px, r.g.position.z - pz) / Math.max(k, 0.001);
+      r.speed += (spd - r.speed) * 0.3;
+      r.g.visible = serverNow() - r.t < 30000;   // 30초 넘게 신호 없으면 숨김
+      animateAvatar(r.g, T, r.speed, r.em, r.et, r.speed > 0.25);
+    }
+  } else {
+    camera.position.set(0, 12, 150);
+    camera.rotation.set(-0.05, Math.sin(T * 0.1) * 0.15, 0);
+    if (pRenderer && pAvatar) {
+      pAvatar.rotation.y = Math.PI + Math.sin(T * 0.8) * 0.6;
+      pRenderer.render(pScene, pCam);
+    }
+  }
+
+  updateVideoQuad();
+  renderer.render(scene, camera);
+}
+animate();
